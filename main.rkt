@@ -3,13 +3,6 @@
 (require "ckanren.rkt"
          "minikanren.rkt")
 
-(define (map-sum f)
-  (letrec ([loop (λ (ls)
-                   (cond
-                     [(null? ls) fail]
-                     [else (conde [(f (car ls))] [(loop (cdr ls))])]))])
-    loop))
-
 (define anyo (λ (g) (conde [g] [(anyo g)])))
 
 (define (use-FD)
