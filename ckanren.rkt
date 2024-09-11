@@ -143,7 +143,7 @@
          (λ (xδ)
            (let ([i (intersectionδ xδ δ)])
              (cond
-               [(null? δ i) #f]
+               [(null?δ i) #f]
                [else ((resolve-storableδ i x) a)])))]
         [else ((resolve-storableδ δ x) a)])))
 
@@ -299,25 +299,6 @@
 (define-syntax infd
   (syntax-rules ()
     [(_ x0 x ... e) (let ([n* e]) (fresh () (domfd x0 n*) (domfd x n*) ...))]))
-
-#|
-(define (run-constraints0 x∗-ignored c)
-  (cond
-    [(null? c) identityM]
-    [else
-      (composeM
-        (oc->proc (car c))
-        (run-constraints0 x∗-ignored (cdr c)))]))
-
-(define (run-constraints1 x∗ c)
-     (cond
-       [(null? c) identityM]
-       [(any-relevant/var? (oc->rands (car c)) x∗ )
-         (composeM
-           (oc->proc (car c))
-           (run-constraints1 x∗ (cdr c)))]
-       [else (run-constraints1 x∗ (cdr c))]))
-|#
 
 (define (process-prefix-FD p c)
   (cond
