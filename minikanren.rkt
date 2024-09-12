@@ -130,18 +130,10 @@
 (define (oc->prefix oc)
   (car (oc->rands oc)))
 
-(define var vector)
-(define var? vector?)
-; this one is my best guess
-#|
-(define (eq-var? a b)
-  (and
-   (var? a)
-   (var? b)
-   (= (vector-length a) (vector-length b) 1)
-   (eq? (vector-ref 0 a) (vector-ref 0 b))))
-|#
-; this is what mballantyne uses (https://github.com/webyrd/miniKanren-with-symbolic-constraints/blob/master/mk.scm#L101)
+(struct variable (name) #:guard (λ (name _) (symbol? name)))
+
+(define var variable)
+(define var? variable?)
 (define eq-var? eq?)
 (define empty-s '())
 (define lhs car)
