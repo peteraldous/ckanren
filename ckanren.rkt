@@ -4,6 +4,7 @@
 
 (provide (all-defined-out))
 
+; After macro expansion, this is just the Scheme identity function
 (define identityM (λM (a) a))
 (define (composeM fM fˆM)
   (λM (a) (let ([a (fM a)]) (and a (fˆM a)))))
@@ -19,12 +20,16 @@
     [(var? t) #t]
     [(pair? t) (or (any/var? (car t)) (any/var? (cdr t)))]
     [else #f]))
+
+; determine if `t` is or contains a variable found in `x*`
 (define (any-relevant/var? t x*)
   (cond
     [(var? t) (memq t x*)]
     [(pair? t) (or (any-relevant/var? (car t) x*) (any-relevant/var? (cdr t) x*))]
     [else #f]))
 
+; extend a constraint store `c` with the operator constraint `oc` (assuming that `oc` contains at
+; least one variable; the store is not used for constraints between constants.
 (define (ext-c oc c)
   (cond
     [(any/var? (oc->rands oc)) (cons oc c)]
@@ -78,20 +83,25 @@
     [(< (car δ1) (car δ2)) (intersectionδ (cdr δ1) δ2)]
     [else (intersectionδ δ1 (cdr δ2))]))
 
+; ensure that `x` is in `r`, prepending it if it is not
+(define (ext/vars x r)
+  (cond
+    ; if `x` is in `r`, return `r`
+    [(memq x r) r]
+    ; otherwise, prepend `x` to `r`
+    [else (cons x r)]))
+
 (define (recover/vars p)
   (cond
     [(null? p) '()]
     [else
+     ; `p` = `((,x . ,v) . ,r') and `r` = `(recover/vars r')`
      (let ([x (lhs (car p))]
            [v (rhs (car p))]
            [r (recover/vars (cdr p))])
        (cond
          [(var? v) (ext/vars v (ext/vars x r))]
          [else (ext/vars x r)]))]))
-(define (ext/vars x r)
-  (cond
-    [(memq x r) r]
-    [else (cons x r)]))
 
 (define (verify-all-bound c bound-x*)
   (unless (null? c)
@@ -113,7 +123,7 @@
 (define (rem/run oc)
   (λM (a : s d c)
       (cond
-        [(memq oc c) (let ([ĉ (remq oc c)]) ((oc->proc oc) (make-a s d ĉ)))]
+        [(memq oc c) (let ([ĉ (remq oc c)]) ((oc->proc oc) (package s d ĉ)))]
         [else a])))
 
 (define (run-constraints x* c)
@@ -131,9 +141,9 @@
       (cond
         [(singleton?δ δ)
          (let* ([n (singleton-elementδ δ)]
-                [a (make-a (ext-s x n s) d c)])
+                [a (package (ext-s x n s) d c)])
            ((run-constraints `(,x) c) a))]
-        [else (make-a s (ext-d x δ d) c)])))
+        [else (package s (ext-d x δ d) c)])))
 
 (define (update-varδ x δ)
   (λM (a : s d c)
@@ -181,7 +191,7 @@
          (letδ (s d)
                ((u : uδ) ...)
                (let* ([c (ext-c (buildoc op u ...) c)]
-                      [a (make-a s d c)])
+                      [a (package s d c)])
                  (cond
                    [(and uδ ...) (body a)]
                    [else a]))))]))
@@ -204,6 +214,12 @@
 (define (domfd x n*)
   (goal-construct (domfdc x n*)))
 
+(define (domNEQc x n*)
+  (λM (a : s d c) a))
+
+(define (domNEQ x n*)
+  (goal-construct (domNEQc x n*)))
+
 (define (⩽fd u v)
   (goal-construct (⩽fdc u v)))
 
@@ -214,6 +230,13 @@
               [vmax (maxδ vδ)])
           (composeM (processδ u (copy-before (λ (u) (< vmax u)) uδ))
                     (processδ v (drop-before (λ (v) (<= umin v)) vδ))))))
+
+(define <fd (λ (u v) (fresh () (⩽fd u v) (=/=fd u v))))
+(define range
+  (λ (lb ub)
+    (cond
+      [(< lb ub) (cons lb (range (+ lb 1) ub))]
+      [else (cons lb '())])))
 
 (define (+fdc u v w)
   (c-op +fdc
@@ -238,12 +261,12 @@
     (s d)
     ((u : uδ) (v : vδ))
     (cond
-      [(or (not uδ) (not vδ)) (make-a s d (ext-c (buildoc =/=fdc u v) c))]
+      [(or (not uδ) (not vδ)) (package s d (ext-c (buildoc =/=fdc u v) c))]
       [(and (singleton?δ uδ) (singleton?δ vδ) (= (singleton-elementδ uδ) (singleton-elementδ vδ))) #f]
       [(disjoint?δ uδ vδ) a]
       [else
-       (let* ([ĉ (ext-c (buildoc =/=fd c u v) c)]
-              [a (make-a s d ĉ)])
+       (let* ([ĉ (ext-c (buildoc =/=fdc u v) c)]
+              [a (package s d ĉ)])
          (cond
            [(singleton?δ uδ) ((processδ v (diffδ vδ uδ)) a)]
            [(singleton?δ vδ) ((processδ u (diffδ uδ vδ)) a)]
@@ -269,7 +292,7 @@
         (cond
           [(null? y*)
            (let* ([oc (buildoc all-diff/fdc x* n*)]
-                  [a (make-a s d (ext-c oc c))])
+                  [a (package s d (ext-c oc c))])
              ((exclude-fromδ (makeδ n*) d x*) a))]
           [else
            (let ([y (walk (car y*) s)])
@@ -278,14 +301,11 @@
                [(memv?δ y n*) #f]
                [else (let ([n* (list-insert < y n*)]) (loop (cdr y*) n* x*))]))]))))
 
-; sort is list-sort in r6rs
-(define list-sort sort)
-
 (define (all-difffdc v*)
   (λM (a : s d c)
       (let ([v* (walk v* s)])
         (cond
-          [(var? v*) (let* ([oc (buildoc all-difffdc v*)]) (make-a s d (ext-c oc c)))]
+          [(var? v*) (let* ([oc (buildoc all-difffdc v*)]) (package s d (ext-c oc c)))]
           [else
            (let-values ([(x* n*) (partition var? v*)])
              (let ([n* (list-sort < n*)])
@@ -302,10 +322,13 @@
 
 (define (process-prefix-FD p c)
   (cond
+    ; if the prefix is empty, return a function that takes `c` and just returns it.
     [(null? p) identityM]
+    ; otherwise, get the first pair from `p` and match it against `(,x . ,v).
     [else
      (let ([x (lhs (car p))]
            [v (rhs (car p))])
+       ;
        (let ([t (composeM (run-constraints `(,x) c) (process-prefix-FD (cdr p) c))])
          (λM (a : s d c)
              (cond
@@ -313,6 +336,49 @@
                 =>
                 (λ (δ) ((composeM (processδ v δ) t) a))]
                [else (t a)]))))]))
+
+(define (enforce-constraints-FD x)
+  (fresh ()
+         (force-ans x)
+         (λG (a : s d c)
+             (let ([bound-x∗ (map lhs d)])
+               (verify-all-bound c bound-x∗)
+               ((onceo (force-ans bound-x∗)) a)))))
+
+(define (reify-constraints-FD m r)
+  (error 'reify-constraints-FD "Unbound vars at end\n"))
+
+(define (use-FD)
+  (process-prefix process-prefix-FD)
+  (enforce-constraints enforce-constraints-FD)
+  (reify-constraints reify-constraints-FD))
+
+(define (process-prefix-NEQ p c)
+  (run-constraints (recover/vars p) c))
+
+; do nothing
+(define (enforce-constraints-NEQ x)
+  unitG)
+
+(define (reify-constraints-NEQ m r)
+  ; produce a goal
+  (λG (a : s d c)
+      ; find `c` (from the package passed to the goal) in `r`, the reified version of `m`.
+      (let* ([c (walk* c r)]
+             ; turn every operational constraint in c into a substitution prefix, discarding any
+             ; that contain a variable - what remains??
+             [p* (remp any/var? (map oc->prefix c))])
+        (cond
+          ; if no constraints remain, just return `m`
+          [(null? p*) m]
+          ; otherwise, add the constraints from `p*` to `m`.
+          ; I believe that this is equivalent to (cons m (cons '=/= p*)).
+          [else `(,m : . ((=/= . ,p*)))]))))
+
+(define (use-NEQ)
+  (process-prefix process-prefix-NEQ)
+  (enforce-constraints enforce-constraints-NEQ)
+  (reify-constraints reify-constraints-NEQ))
 
 (define (map-sum f)
   (letrec ([loop (λ (ls)
@@ -349,13 +415,46 @@
 (define (onceo g)
   (condu (g)))
 
-(define (enforce-constraints-FD x)
-  (fresh ()
-         (force-ans x)
-         (λG (a : s d c)
-             (let ([bound-x∗ (map lhs d)])
-               (verify-all-bound c bound-x∗)
-               ((onceo (force-ans bound-x∗)) a)))))
+(define (normalize-store p)
+  (λM (a : s d c)
+      (let loop ([c c]
+                 [ĉ '()])
+        (cond
+          [(null? c) (let ([ĉ (ext-c (buildoc =/=neqc p) ĉ)]) (package s d ĉ))]
+          [(eq? (oc->rator (car c)) '=/=neqc)
+           (let* ([oc (car c)]
+                  [p̂ (oc->prefix oc)])
+             (cond
+               [(subsumes? p̂ p) a]
+               [(subsumes? p p̂) (loop (cdr c) ĉ)]
+               [else (loop (cdr c) (cons oc ĉ))]))]
+          [else (loop (cdr c) (cons (car c) ĉ))]))))
+(define (=/=neqc p)
+  (λM (a : s d c)
+      (cond
+        [(unify p s)
+         =>
+         (λ (ŝ)
+           (let ([p (prefix-s s ŝ)])
+             (cond
+               [(null? p) #f]
+               [else ((normalize-store p) a)])))]
+        [else a])))
+(define (=/=c u v)
+  (λM (a : s d c)
+      (cond
+        [(unify `((,u . ,v)) s)
+         =>
+         (λ (ŝ) ((=/=neqc (prefix-s s ŝ)) a))]
+        [else a])))
+(define (=/= u v)
+  (goal-construct (=/=c u v)))
 
-(define (reify-constraints-FD m r)
-  (error 'reify-constraints-FD "Unbound vars at end\n"))
+(define (all-diffo l)
+  (conde ((== l '()))
+         ((fresh (a) (== l `(,a))))
+         ((fresh (a ad dd)
+                 (== l `(,a ,ad . ,dd))
+                 (=/= a ad)
+                 (all-diffo `(,a . ,dd))
+                 (all-diffo `(,ad . ,dd))))))
